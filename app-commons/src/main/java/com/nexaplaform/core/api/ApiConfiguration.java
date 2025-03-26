@@ -1,5 +1,6 @@
 package com.nexaplaform.core.api;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.models.media.*;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
@@ -18,7 +19,7 @@ import java.util.*;
 @Configuration
 public class ApiConfiguration {
 
-    @Value("${nexaplaform.openapi.scan-package:com.nexaplaform}") // configurable
+    @Value("${nexaplaform.openapi.scan-package}")
     private String basePackageToScan;
 
     @Bean
@@ -27,27 +28,43 @@ public class ApiConfiguration {
             openApi.getPaths().forEach((path, pathItem) -> {
                 pathItem.readOperations().forEach(operation -> {
                     String operationId = operation.getOperationId();
-
                     Optional<Method> methodOpt = findMethodByOperationId(operationId);
+                    ApiResponses responses = operation.getResponses();
 
-                    if (methodOpt.isPresent()) {
-                        Method method = methodOpt.get();
-                        ApiResponses responses = operation.getResponses();
+                    addIfMissing(responses, "401", "Unauthorized");
+                    addIfMissing(responses, "403", "Forbidden");
+                    addIfMissing(responses, "500", "Internal server error");
 
-                        addIfMissing(responses, "401", "Unauthorized");
-                        addIfMissing(responses, "403", "Forbidden");
-                        addIfMissing(responses, "500", "Internal server error");
-
-                        if (has404Mapping(method)) {
-                            addIfMissing(responses, "404", "Not found");
-                        }
+                    if (methodOpt.isPresent() && has404Mapping(methodOpt.get())) {
+                        addIfMissing(responses, "404", "Not found");
                     }
                 });
             });
         };
     }
 
+
     private boolean has404Mapping(Method method) {
+
+        if (hasMappingOnMethod(method)) {
+            return true;
+        }
+
+        Class<?> declaringClass = method.getDeclaringClass();
+        for (Class<?> face : declaringClass.getInterfaces()) {
+            try {
+                Method interfaceMethod = face.getMethod(method.getName(), method.getParameterTypes());
+                if (hasMappingOnMethod(interfaceMethod)) {
+                    return true;
+                }
+            } catch (NoSuchMethodException ignored) {
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasMappingOnMethod(Method method) {
         return method.isAnnotationPresent(GetMapping.class)
                 || method.isAnnotationPresent(PutMapping.class)
                 || method.isAnnotationPresent(DeleteMapping.class);
@@ -55,10 +72,14 @@ public class ApiConfiguration {
 
     private Optional<Method> findMethodByOperationId(String operationId) {
         Set<Class<?>> candidates = scanClassesInPackage(basePackageToScan);
+
         for (Class<?> clazz : candidates) {
-            for (Method method : clazz.getDeclaredMethods()) {
-                if (method.getName().equals(operationId)) {
-                    return Optional.of(method);
+            for (Method method : clazz.getMethods()) {
+                if (method.isAnnotationPresent(Operation.class)) {
+                    String opId = method.getAnnotation(Operation.class).operationId();
+                    if (opId.equals(operationId)) {
+                        return Optional.of(method);
+                    }
                 }
             }
         }
@@ -67,7 +88,10 @@ public class ApiConfiguration {
 
     private Set<Class<?>> scanClassesInPackage(String basePackage) {
         Reflections reflections = new Reflections(basePackage);
-        return new HashSet<>(reflections.getSubTypesOf(Object.class));
+        Set<Class<?>> allTypes = new HashSet<>();
+        allTypes.addAll(reflections.getTypesAnnotatedWith(org.springframework.web.bind.annotation.RestController.class));
+        allTypes.addAll(reflections.getTypesAnnotatedWith(org.springframework.web.bind.annotation.RequestMapping.class));
+        return allTypes;
     }
 
     private void addIfMissing(ApiResponses responses, String code, String description) {
