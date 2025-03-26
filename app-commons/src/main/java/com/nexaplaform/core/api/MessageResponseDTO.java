@@ -1,4 +1,4 @@
-package com.nexaplaform.core.api.dto;
+package com.nexaplaform.core.api;
 
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -20,7 +20,7 @@ public class MessageResponseDTO {
     private String code;
     @Schema(example = "Message error description.")
     private String message;
-    @ArraySchema(schema = @Schema( implementation = String.class))
+    @ArraySchema(schema = @Schema(implementation = String.class))
     private List<String> details;
     @Schema(example = "2024-05-01T20:35:10")
     private ZonedDateTime timeStamp;
